@@ -26,6 +26,12 @@ $ go get github.com/rojer/oovpnas
 $ oovpnas --logtostderr --profile-root=/path/to/ovpn/files --acme-challenge-root=/etc/letsencrypt --https-cert-file=/etc/letsencrypt/live/XXX/fullchain.pem --https-key-file=/etc/letsencrypt/live/XXX/privkey.pem
 ```
 
+### Docker usage
+```
+$ git clone https://github.com/rojer/oovpnas.git
+$ docker-compose up --build --detach
+```
+
 ## License
 
 Apache 2, see [LICENSE](LICENSE).

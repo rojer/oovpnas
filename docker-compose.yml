@@ -1,0 +1,13 @@
+version: '3'
+services:
+  oovpnas:
+    container_name: oovpnas
+    restart: unless-stopped
+    env_file: docker-config.env
+    build: 
+      context: .
+    ports:
+      - "${HOST_PORT_HTTP}:80"
+      - "${HOST_PORT_HTTPS}:443"
+    volumes:
+      - /etc/letsencrypt:/etc/letsencrypt:rw
