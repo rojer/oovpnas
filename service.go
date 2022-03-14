@@ -111,6 +111,11 @@ func (h *OpenVPNASService) CloseSession(_ *http.Request, _ *CloseSessionArg, _ *
 	return nil
 }
 
+func remoteIP(r *http.Request) string {
+	parts := strings.Split(r.RemoteAddr, ":")
+	return strings.Join(parts[:len(parts)-1], ":")
+}
+
 func (h *OpenVPNASService) getProfile(user, pass string) (string, error) {
 	if len(pass) < 12 || len(pass) > 64 {
 		return "", fmt.Errorf("invalid pass")
@@ -128,33 +133,46 @@ func (h *OpenVPNASService) getProfile(user, pass string) (string, error) {
 	return string(data), nil
 }
 
+func (h *OpenVPNASService) serveProfile(w http.ResponseWriter, r *http.Request) {
+	user, pass, ok := r.BasicAuth()
+	if !ok {
+		w.Header().Set("WWW-Authenticate", `Basic realm="OpenVPN", charset="utf-8"`)
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+	data, err := h.getProfile(user, pass)
+	if err != nil {
+		glog.Errorf("%s %q: %v", remoteIP(r), user, err)
+		w.Header().Set("WWW-Authenticate", `Basic realm="OpenVPN", charset="utf-8"`)
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(data)))
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(data))
+}
+
 func (h *OpenVPNASService) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
 	f := path.Base(r.URL.Path)
+	glog.Infof("%s %s", remoteIP(r), r.URL.Path)
 	switch {
 	case r.URL.Path == "/":
 		http.ServeFile(w, r, filepath.Join(h.profileRoot, "index.html"))
+	case r.URL.Path == "/rest/GetUserlogin":
+		h.serveProfile(w, r)
+	case r.URL.Path == "/rest/GetAutologin":
+		h.serveProfile(w, r)
 	case strings.HasSuffix(f, ".ovpn"):
-		user, pass, ok := r.BasicAuth()
-		if !ok {
-			w.Header().Set("WWW-Authenticate", `Basic realm="OpenVPN", charset="utf-8"`)
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
-			return
-		}
-		if f != fmt.Sprintf("%s.ovpn", user) {
+		if user, _, _ := r.BasicAuth(); f != fmt.Sprintf("%s.ovpn", user) {
 			http.Error(w, "Not Found", http.StatusNotFound)
 			return
 		}
-		data, err := h.getProfile(user, pass)
-		if err != nil {
-			glog.Errorf("%s: %v", f, err)
-			w.Header().Set("WWW-Authenticate", `Basic realm="OpenVPN", charset="utf-8"`)
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
-			return
-		}
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.Header().Set("Content-Length", fmt.Sprintf("%d", len(data)))
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(data))
+		h.serveProfile(w, r)
+	default:
+		user, pass, _ := r.BasicAuth()
+		glog.Warningf("%s %s Not Found %s %s", remoteIP(r), r.URL.Path, user, pass)
+		http.Error(w, "Not Found", http.StatusNotFound)
 	}
 }

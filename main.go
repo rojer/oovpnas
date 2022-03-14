@@ -51,6 +51,7 @@ func handleRPC2(w http.ResponseWriter, r *http.Request) {
 	r.Body.Close()
 	d = bytes.Replace(d, []byte("<methodName>"), []byte(fmt.Sprintf("<methodName>%s.", svcName)), 1)
 	r.Body = ioutil.NopCloser(bytes.NewBuffer(d))
+	glog.Infof("%s: %s", r.RemoteAddr, r.URL.Path)
 	RPC.ServeHTTP(w, r)
 }
 
