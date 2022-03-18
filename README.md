@@ -19,11 +19,54 @@ For example, to retrieve `CLIENT1.ovpn` with SHA256 hash `ad81f87be989eb1d41e95f
 
 The server also provides the necessary functionality to serve ACME TLS certificate challenges and static content for a simple web interface (any files not ending in `.ovpn` are served without authentication and `index.html` is the index file name).
 
-## Usage Example
+## Installation
+
+Installation:
+
+1. Install [Go](https://go.dev/)
+  * From distro package (Debian/Ubuntu: `golang-go`) or by following instructions [here](https://go.dev/dl/).
+2. Build and install the binary
+  * `sudo GOBIN=/usr/local/bin go install github.com/rojer/oovpnas`
+
+## Usage Examples
+
+The server can be run in a variety of modes.
+
+### Standalone with TLS
+
+Listens on ports 80 and 443, serves files directly, including ACME certificate challenges (for [LetsEncrypt](https://letsencrypt.org/)).
 
 ```
-$ go get github.com/rojer/oovpnas
-$ oovpnas --logtostderr --profile-root=/path/to/ovpn/files --acme-challenge-root=/etc/letsencrypt --https-cert-file=/etc/letsencrypt/live/XXX/fullchain.pem --https-key-file=/etc/letsencrypt/live/XXX/privkey.pem
+$ sudo /usr/local/bin/oovpnas \
+    --logtostderr \
+    --profile-root=/path/to/ovpn/files \
+    --acme-challenge-root=/etc/letsencrypt \
+    --https-cert-file=/etc/letsencrypt/live/XXX/fullchain.pem \
+    --https-key-file=/etc/letsencrypt/live/XXX/privkey.pem
+```
+
+### As a Backend
+
+Serves on some other port, assumes TLS is handled by some other server acting as a reverse proxy.
+
+```
+$ sudo /usr/local/bin/oovpnas \
+    --logtostderr \
+    --profile-root=/path/to/ovpn/files \
+    --http-port=127.0.0.1:8910 \
+    --real-ip-header=X-Real-IP
+```
+
+Sample location config for Nginx:
+
+```
+    location / {
+        expires -1;
+        proxy_redirect off;
+        proxy_pass http://127.0.0.1:8910/;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_http_version 1.1;
+    }
 ```
 
 ### Docker usage

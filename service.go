@@ -29,13 +29,17 @@ import (
 	glog "k8s.io/klog/v2"
 )
 
-func NewService(profileRoot string) *OpenVPNASService {
+func NewService(profileRoot, realIPHeader string) *OpenVPNASService {
 	glog.Infof("Serving profiles from %s", profileRoot)
-	return &OpenVPNASService{profileRoot: profileRoot}
+	return &OpenVPNASService{
+		profileRoot:  profileRoot,
+		realIPHeader: realIPHeader,
+	}
 }
 
 type OpenVPNASService struct {
-	profileRoot string
+	profileRoot  string
+	realIPHeader string
 }
 
 type Empty struct{}
@@ -111,9 +115,19 @@ func (h *OpenVPNASService) CloseSession(_ *http.Request, _ *CloseSessionArg, _ *
 	return nil
 }
 
-func remoteIP(r *http.Request) string {
-	parts := strings.Split(r.RemoteAddr, ":")
-	return strings.Join(parts[:len(parts)-1], ":")
+func (h *OpenVPNASService) remoteIP(r *http.Request) string {
+	var remoteAddr string
+	if len(h.realIPHeader) > 0 {
+		if hv := r.Header.Get(h.realIPHeader); len(hv) > 0 {
+			ips := strings.Split(hv, ",")
+			remoteAddr = strings.TrimSpace(ips[0])
+		}
+	}
+	if len(remoteAddr) == 0 {
+		parts := strings.Split(r.RemoteAddr, ":")
+		remoteAddr = strings.Join(parts[:len(parts)-1], ":")
+	}
+	return remoteAddr
 }
 
 func (h *OpenVPNASService) getProfile(user, pass string) (string, error) {
@@ -142,7 +156,7 @@ func (h *OpenVPNASService) serveProfile(w http.ResponseWriter, r *http.Request) 
 	}
 	data, err := h.getProfile(user, pass)
 	if err != nil {
-		glog.Errorf("%s %q: %v", remoteIP(r), user, err)
+		glog.Errorf("%s %q: %v", h.remoteIP(r), user, err)
 		w.Header().Set("WWW-Authenticate", `Basic realm="OpenVPN", charset="utf-8"`)
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
@@ -156,7 +170,7 @@ func (h *OpenVPNASService) serveProfile(w http.ResponseWriter, r *http.Request) 
 func (h *OpenVPNASService) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
 	f := path.Base(r.URL.Path)
-	glog.Infof("%s %s", remoteIP(r), r.URL.Path)
+	glog.Infof("%s %s", h.remoteIP(r), r.URL.Path)
 	switch {
 	case r.URL.Path == "/":
 		http.ServeFile(w, r, filepath.Join(h.profileRoot, "index.html"))
@@ -165,14 +179,19 @@ func (h *OpenVPNASService) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.URL.Path == "/rest/GetAutologin":
 		h.serveProfile(w, r)
 	case strings.HasSuffix(f, ".ovpn"):
-		if user, _, _ := r.BasicAuth(); f != fmt.Sprintf("%s.ovpn", user) {
+		user, _, ok := r.BasicAuth()
+		if !ok {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+		if f != fmt.Sprintf("%s.ovpn", user) {
 			http.Error(w, "Not Found", http.StatusNotFound)
 			return
 		}
 		h.serveProfile(w, r)
 	default:
 		user, pass, _ := r.BasicAuth()
-		glog.Warningf("%s %s Not Found %s %s", remoteIP(r), r.URL.Path, user, pass)
+		glog.Warningf("%s %s Not Found %s %s", h.remoteIP(r), r.URL.Path, user, pass)
 		http.Error(w, "Not Found", http.StatusNotFound)
 	}
 }

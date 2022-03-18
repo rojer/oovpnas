@@ -33,12 +33,13 @@ import (
 )
 
 var (
-	flagHTTPPort          = flag.Int("http-port", 80, "HTTP port to listen on")
-	flagHTTPSPort         = flag.Int("https-port", 443, "HTTPS port to listen on")
+	flagHTTPPort          = flag.String("http-port", ":80", "HTTP address andr port to listen on")
+	flagHTTPSPort         = flag.String("https-port", ":443", "HTTPS address and port to listen on")
 	flagCertFile          = flag.String("https-cert-file", "", "TLS certificate file")
 	flagkeyFile           = flag.String("https-key-file", "", "TLS key file")
 	flagACMEChallengeRoot = flag.String("acme-challenge-root", "", "Directory to serve /.well-known/acme-challenge from")
 	flagProfileRoot       = flag.String("profile-root", "", "Serve .ovpn profiles from this location")
+	flagRealIPHeader      = flag.String("real-ip-header", "", "When behind a proxy, extract real IP from this header")
 )
 
 const svcName = "OpenVPN"
@@ -74,7 +75,7 @@ func main() {
 	if fi, err := os.Stat(pr); err != nil || !fi.Mode().IsDir() {
 		glog.Exitf("%s does not exist or is not a directory", *flagProfileRoot)
 	}
-	svc := NewService(pr)
+	svc := NewService(pr, *flagRealIPHeader)
 
 	var httpMux, httpsMux http.ServeMux
 	var tlsConfig *tls.Config
@@ -97,7 +98,7 @@ func main() {
 		}
 
 		hs := &http.Server{
-			Addr:      fmt.Sprintf(":%d", *flagHTTPSPort),
+			Addr:      *flagHTTPSPort,
 			Handler:   &httpsMux,
 			TLSConfig: tlsConfig,
 		}
@@ -105,7 +106,7 @@ func main() {
 		httpsMux.Handle("/", svc)
 
 		go func() {
-			glog.Infof("Listening on HTTPS port %d ...", *flagHTTPSPort)
+			glog.Infof("Listening on HTTPS port %s ...", *flagHTTPSPort)
 			glog.Fatal(hs.ListenAndServeTLS(*flagCertFile, *flagkeyFile))
 		}()
 	} else {
@@ -118,7 +119,7 @@ func main() {
 	}
 
 	hs := &http.Server{
-		Addr:    fmt.Sprintf(":%d", *flagHTTPPort),
+		Addr:    *flagHTTPPort,
 		Handler: &httpMux,
 	}
 
@@ -129,6 +130,6 @@ func main() {
 	RPC.RegisterService(svc, svcName)
 	httpMux.HandleFunc("/RPC2", handleRPC2)
 
-	glog.Infof("Listening on HTTP port %d ...", *flagHTTPPort)
+	glog.Infof("Listening on HTTP port %s ...", *flagHTTPPort)
 	glog.Fatal(hs.ListenAndServe())
 }
