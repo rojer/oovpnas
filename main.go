@@ -18,118 +18,30 @@
 package main
 
 import (
-	"bytes"
-	"crypto/tls"
-	"flag"
 	"fmt"
-	"io/ioutil"
-	"net/http"
 	"os"
-	"path/filepath"
 
-	"github.com/divan/gorilla-xmlrpc/xml"
-	"github.com/gorilla/rpc"
-	glog "k8s.io/klog/v2"
+	"github.com/spf13/cobra"
+
+	"github.com/rojer/oovpnas/server"
 )
 
-var (
-	flagHTTPPort          = flag.String("http-port", ":80", "HTTP address andr port to listen on")
-	flagHTTPSPort         = flag.String("https-port", ":443", "HTTPS address and port to listen on")
-	flagCertFile          = flag.String("https-cert-file", "", "TLS certificate file")
-	flagkeyFile           = flag.String("https-key-file", "", "TLS key file")
-	flagACMEChallengeRoot = flag.String("acme-challenge-root", "", "Directory to serve /.well-known/acme-challenge from")
-	flagProfileRoot       = flag.String("profile-root", "", "Serve .ovpn profiles from this location")
-	flagRealIPHeader      = flag.String("real-ip-header", "", "When behind a proxy, extract real IP from this header")
-)
-
-const svcName = "OpenVPN"
-
-var RPC *rpc.Server
-
-func handleRPC2(w http.ResponseWriter, r *http.Request) {
-	// Add dummy service part.
-	d, _ := ioutil.ReadAll(r.Body)
-	r.Body.Close()
-	d = bytes.Replace(d, []byte("<methodName>"), []byte(fmt.Sprintf("<methodName>%s.", svcName)), 1)
-	r.Body = ioutil.NopCloser(bytes.NewBuffer(d))
-	glog.Infof("%s: %s", r.RemoteAddr, r.URL.Path)
-	RPC.ServeHTTP(w, r)
-}
+const VERSION = "1.0.0"
 
 func main() {
-	var err error
-	glog.InitFlags(nil)
-	glog.LogToStderr(false) // Can be enabled with --logtostderr/--alsologtostderr.
-	flag.Parse()
-
-	if *flagProfileRoot == "" {
-		glog.Exitf("--profile-root is required")
+	rootCmd := &cobra.Command{
+		Use:     "oovpnas",
+		Short:   "Open OpenVPN Access Server",
+		Long:    "An alternative OpenVPN AS implementation",
+		Version: VERSION,
+		CompletionOptions: cobra.CompletionOptions{
+			DisableDefaultCmd: true,
+		},
 	}
+	server.RegisterCmd(rootCmd)
 
-	glog.Infof("Starting...")
-
-	pr, err := filepath.Abs(*flagProfileRoot)
-	if err != nil {
-		glog.Exitf("%s does not exist", *flagProfileRoot)
+	if err := rootCmd.Execute(); err != nil {
+		fmt.Println(err)
+		os.Exit(1)
 	}
-	if fi, err := os.Stat(pr); err != nil || !fi.Mode().IsDir() {
-		glog.Exitf("%s does not exist or is not a directory", *flagProfileRoot)
-	}
-	svc := NewService(pr, *flagRealIPHeader)
-
-	var httpMux, httpsMux http.ServeMux
-	var tlsConfig *tls.Config
-	if *flagCertFile != "" || *flagkeyFile != "" {
-		// Check for partial configuration.
-		if *flagCertFile == "" || *flagkeyFile == "" {
-			glog.Exitf("Failed to load certificate and key: both were not provided")
-		}
-		tlsConfig = &tls.Config{
-			MinVersion:               tls.VersionTLS12,
-			PreferServerCipherSuites: true,
-			NextProtos:               []string{"http/1.1"},
-			Certificates:             make([]tls.Certificate, 1),
-		}
-		glog.Infof("Cert file: %s", *flagCertFile)
-		glog.Infof("Key file : %s", *flagkeyFile)
-		tlsConfig.Certificates[0], err = tls.LoadX509KeyPair(*flagCertFile, *flagkeyFile)
-		if err != nil {
-			glog.Exitf("Failed to load certificate and key: %s", err)
-		}
-
-		hs := &http.Server{
-			Addr:      *flagHTTPSPort,
-			Handler:   &httpsMux,
-			TLSConfig: tlsConfig,
-		}
-		httpsMux.HandleFunc("/RPC2", handleRPC2)
-		httpsMux.Handle("/", svc)
-
-		go func() {
-			glog.Infof("Listening on HTTPS port %s ...", *flagHTTPSPort)
-			glog.Fatal(hs.ListenAndServeTLS(*flagCertFile, *flagkeyFile))
-		}()
-	} else {
-		glog.Warning("Running without TLS")
-		httpMux.Handle("/", svc)
-	}
-
-	if *flagACMEChallengeRoot != "" {
-		HandleACMEChallenges(*flagACMEChallengeRoot, &httpMux)
-	}
-
-	hs := &http.Server{
-		Addr:    *flagHTTPPort,
-		Handler: &httpMux,
-	}
-
-	RPC = rpc.NewServer()
-	xmlrpcCodec := xml.NewCodec()
-	RPC.RegisterCodec(xmlrpcCodec, "text/xml")                          // Should be this
-	RPC.RegisterCodec(xmlrpcCodec, "application/x-www-form-urlencoded") // Actually this
-	RPC.RegisterService(svc, svcName)
-	httpMux.HandleFunc("/RPC2", handleRPC2)
-
-	glog.Infof("Listening on HTTP port %s ...", *flagHTTPPort)
-	glog.Fatal(hs.ListenAndServe())
 }

@@ -15,7 +15,7 @@
  * limitations under the License.
  */
 
-package main
+package server
 
 import (
 	"crypto/sha256"

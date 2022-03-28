@@ -38,11 +38,13 @@ Listens on ports 80 and 443, serves files directly, including ACME certificate c
 
 ```
 $ sudo /usr/local/bin/oovpnas \
-    --logtostderr \
-    --profile-root=/path/to/ovpn/files \
-    --acme-challenge-root=/etc/letsencrypt \
-    --https-cert-file=/etc/letsencrypt/live/XXX/fullchain.pem \
-    --https-key-file=/etc/letsencrypt/live/XXX/privkey.pem
+    serve \
+      --profile-root=/path/to/ovpn/files \
+      --http-port=80 \
+      --https-port=443 \
+      --acme-challenge-root=/etc/letsencrypt \
+      --https-cert-file=/etc/letsencrypt/live/XXX/fullchain.pem \
+      --https-key-file=/etc/letsencrypt/live/XXX/privkey.pem
 ```
 
 ### As a Backend
@@ -50,11 +52,11 @@ $ sudo /usr/local/bin/oovpnas \
 Serves on some other port, assumes TLS is handled by some other server acting as a reverse proxy.
 
 ```
-$ sudo /usr/local/bin/oovpnas \
-    --logtostderr \
-    --profile-root=/path/to/ovpn/files \
-    --http-port=127.0.0.1:8910 \
-    --real-ip-header=X-Real-IP
+$ /usr/local/bin/oovpnas \
+    serve \
+      --profile-root=/path/to/ovpn/files \
+      --http-port=127.0.0.1:8910 \
+      --real-ip-header=X-Real-IP
 ```
 
 Sample location config for Nginx:
@@ -71,7 +73,7 @@ Sample location config for Nginx:
 
 ### Docker usage
 ```
-$ git clone https://github.com/rojer/oovpnas.git
+$ git clone https://github.com/rojer/oovpnas
 $ docker-compose up --build --detach
 ```
 
