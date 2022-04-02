@@ -18,17 +18,13 @@
 package server
 
 import (
-	"bytes"
 	"crypto/tls"
 	"fmt"
-	"io/ioutil"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 
-	"github.com/divan/gorilla-xmlrpc/xml"
-	"github.com/gorilla/rpc"
 	"github.com/spf13/cobra"
 	glog "k8s.io/klog/v2"
 )
@@ -61,20 +57,6 @@ var (
 	flagRealIPHeader      string
 )
 
-const svcName = "OpenVPN"
-
-var RPC *rpc.Server
-
-func handleRPC2(w http.ResponseWriter, r *http.Request) {
-	// Add dummy service part.
-	d, _ := ioutil.ReadAll(r.Body)
-	r.Body.Close()
-	d = bytes.Replace(d, []byte("<methodName>"), []byte(fmt.Sprintf("<methodName>%s.", svcName)), 1)
-	r.Body = ioutil.NopCloser(bytes.NewBuffer(d))
-	glog.Infof("%s: %s", r.RemoteAddr, r.URL.Path)
-	RPC.ServeHTTP(w, r)
-}
-
 func redirectToHTTPS(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
 	if r.Host != "" {
@@ -101,12 +83,6 @@ func run(cmd *cobra.Command, args []string) error {
 
 	svc := NewService(pr, flagRealIPHeader)
 
-	RPC = rpc.NewServer()
-	xmlrpcCodec := xml.NewCodec()
-	RPC.RegisterCodec(xmlrpcCodec, "text/xml")                          // Should be this
-	RPC.RegisterCodec(xmlrpcCodec, "application/x-www-form-urlencoded") // Actually this
-	RPC.RegisterService(svc, svcName)
-
 	var httpServer, httpsServer *http.Server
 	if flagHTTPSPort != "" {
 		// Check for partial configuration.
@@ -127,7 +103,6 @@ func run(cmd *cobra.Command, args []string) error {
 		}
 
 		httpsMux := &http.ServeMux{}
-		httpsMux.HandleFunc("/RPC2", handleRPC2)
 		httpsMux.Handle("/", svc)
 
 		addr := flagHTTPSPort
@@ -148,7 +123,6 @@ func run(cmd *cobra.Command, args []string) error {
 			httpMux.HandleFunc("/", redirectToHTTPS)
 		} else {
 			httpMux.Handle("/", svc)
-			httpMux.HandleFunc("/RPC2", handleRPC2)
 		}
 		if flagACMEChallengeRoot != "" {
 			HandleACMEChallenges(flagACMEChallengeRoot, httpMux)

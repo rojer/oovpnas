@@ -18,6 +18,7 @@
 package server
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"fmt"
 	"io/ioutil"
@@ -26,20 +27,31 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/divan/gorilla-xmlrpc/xml"
+	"github.com/gorilla/rpc"
 	glog "k8s.io/klog/v2"
 )
 
+const svcName = "OpenVPN"
+
 func NewService(profileRoot, realIPHeader string) *OpenVPNASService {
 	glog.Infof("Serving profiles from %s", profileRoot)
-	return &OpenVPNASService{
+	svc := &OpenVPNASService{
 		profileRoot:  profileRoot,
 		realIPHeader: realIPHeader,
 	}
+	svc.rpcServer = rpc.NewServer()
+	xmlrpcCodec := xml.NewCodec()
+	svc.rpcServer.RegisterCodec(xmlrpcCodec, "text/xml")                          // Should be this
+	svc.rpcServer.RegisterCodec(xmlrpcCodec, "application/x-www-form-urlencoded") // Actually this
+	svc.rpcServer.RegisterService(svc, svcName)
+	return svc
 }
 
 type OpenVPNASService struct {
 	profileRoot  string
 	realIPHeader string
+	rpcServer    *rpc.Server
 }
 
 type Empty struct{}
@@ -167,6 +179,15 @@ func (h *OpenVPNASService) serveProfile(w http.ResponseWriter, r *http.Request) 
 	w.Write([]byte(data))
 }
 
+func (h *OpenVPNASService) handleRPC2(w http.ResponseWriter, r *http.Request) {
+	// Add dummy service part.
+	d, _ := ioutil.ReadAll(r.Body)
+	r.Body.Close()
+	d = bytes.Replace(d, []byte("<methodName>"), []byte(fmt.Sprintf("<methodName>%s.", svcName)), 1)
+	r.Body = ioutil.NopCloser(bytes.NewBuffer(d))
+	h.rpcServer.ServeHTTP(w, r)
+}
+
 func (h *OpenVPNASService) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
 	f := path.Base(r.URL.Path)
@@ -178,6 +199,8 @@ func (h *OpenVPNASService) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.serveProfile(w, r)
 	case r.URL.Path == "/rest/GetAutologin":
 		h.serveProfile(w, r)
+	case r.URL.Path == "/RPC2":
+		h.handleRPC2(w, r)
 	case strings.HasSuffix(f, ".ovpn"):
 		user, _, ok := r.BasicAuth()
 		if !ok {
