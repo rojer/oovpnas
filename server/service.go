@@ -162,15 +162,13 @@ func (h *OpenVPNASService) getProfile(user, pass string) (string, error) {
 func (h *OpenVPNASService) serveProfile(w http.ResponseWriter, r *http.Request) {
 	user, pass, ok := r.BasicAuth()
 	if !ok {
-		w.Header().Set("WWW-Authenticate", `Basic realm="OpenVPN", charset="utf-8"`)
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		h.send401(w)
 		return
 	}
 	data, err := h.getProfile(user, pass)
 	if err != nil {
 		glog.Errorf("%s %q: %v", h.remoteIP(r), user, err)
-		w.Header().Set("WWW-Authenticate", `Basic realm="OpenVPN", charset="utf-8"`)
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		h.send401(w)
 		return
 	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
@@ -186,6 +184,11 @@ func (h *OpenVPNASService) handleRPC2(w http.ResponseWriter, r *http.Request) {
 	d = bytes.Replace(d, []byte("<methodName>"), []byte(fmt.Sprintf("<methodName>%s.", svcName)), 1)
 	r.Body = ioutil.NopCloser(bytes.NewBuffer(d))
 	h.rpcServer.ServeHTTP(w, r)
+}
+
+func (h *OpenVPNASService) send401(w http.ResponseWriter) {
+	w.Header().Set("WWW-Authenticate", `Basic realm="OpenVPN", charset="utf-8"`)
+	http.Error(w, "Unauthorized", http.StatusUnauthorized)
 }
 
 func (h *OpenVPNASService) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -204,17 +207,15 @@ func (h *OpenVPNASService) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case strings.HasSuffix(f, ".ovpn"):
 		user, _, ok := r.BasicAuth()
 		if !ok {
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			h.send401(w)
 			return
 		}
 		if f != fmt.Sprintf("%s.ovpn", user) {
-			http.Error(w, "Not Found", http.StatusNotFound)
+			http.Error(w, "Bad Request", http.StatusBadRequest)
 			return
 		}
 		h.serveProfile(w, r)
 	default:
-		user, pass, _ := r.BasicAuth()
-		glog.Warningf("%s %s Not Found %s %s", h.remoteIP(r), r.URL.Path, user, pass)
-		http.Error(w, "Not Found", http.StatusNotFound)
+		http.ServeFile(w, r, filepath.Join(h.profileRoot, path.Base(r.URL.Path)))
 	}
 }
